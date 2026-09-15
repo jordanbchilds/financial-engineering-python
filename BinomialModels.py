@@ -304,7 +304,7 @@ class BondLattice(Lattice):
         super().__init__(num_periods)
 
         if hazard_lattice is None:
-            self._hazardLattice = HazardLattice(self.numPeriods, lambda x: 0.0)
+            self._hazardLattice = HazardLattice(self.numPeriods, lambda period_index, outcome_index: 0.0)
             self._recoveryRate = 0.0
         else:
             if hazard_lattice.numPeriods < self.numPeriods:
