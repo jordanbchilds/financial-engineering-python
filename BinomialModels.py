@@ -5,14 +5,12 @@ from abc import ABC, abstractmethod
 import warnings
 from numbers import Real
 
-
+# Classes and functions
 ## Generic Lattice
 class Lattice:
     def __init__(self, num_period: int):
-        if not isinstance(num_period, (int, np.integer)):
-            raise TypeError("`num_period` must be an integer.")
-        if num_period<=0:
-            raise TypeError("number of periods must be a positive integer.")
+        if not isinstance(num_period, (int, np.integer)) and num_period<0:
+            raise TypeError("Number of periods must be a non-negative integer.")
         self._numPeriods = num_period
         self._latticeSize = self._numPeriods + 1
         self._lattice = np.zeros((self._latticeSize, self._latticeSize), dtype=float)
@@ -37,15 +35,13 @@ class Lattice:
     @property
     def numPeriods(self) -> int:
          return self._numPeriods
-
     @property
     def lattice(self) -> np.ndarray:
          return self._lattice
-    
     @property
     def latticeSize(self) -> int:
         return self._latticeSize
-
+    
     def getValue(self, period_index: int, outcome_index: int) -> float:
         self._checkIndex(period_index, outcome_index)
         return self._lattice[period_index - outcome_index, period_index]
@@ -93,58 +89,6 @@ class BinomialLattice(Lattice):
     def initialValue(self) -> float:
         return self._initialValue
 
-class AssetLattice(Lattice):
-    def __int__(self, asset_lattice: Lattice, dividend_yield: float|npt.ArrayLike|None=None, 
-                dividend_periods: npt.ArrayLike|None=None):
-        super().__init__(asset_lattice.numPeriods)
-        self._lattice = asset_lattice
-
-        self._dividendActive = (dividend_yield is None)
-        # Check dividend rates and payment index
-        if self.dividendActive:
-            dividend_yield = np.asarray(dividend_yield, dtype=float)
-            dividend_periods = (np.arange(self.numPeriods)
-                                      if (dividend_periods is None) 
-                                      else np.asarray(dividend_periods, dtype=int))
-            
-        if isinstance(dividend_periods, np.ndarray) and dividend_periods.size == 1:
-            dividend_periods = np.repeat(dividend_periods[0], self.numPeriods)
-
-        if isinstance(dividend_periods, np.ndarray) and isinstance(dividend_yield, np.ndarray):
-            num_dividends = len(dividend_periods)
-            if len(dividend_yield)==1:
-                divdend_rate = np.repeat([dividend_yield[0]], num_dividends)
-            if len(dividend_yield) != len(dividend_periods):
-                raise ValueError("If providing dividend rates and payment index, they must be the same size.")
-
-        self._dividendYields = dividend_yield
-        self._dividendPeriods = dividend_periods
-
-    def _getDividendYield(self, period_index: int):
-        if (self.dividendYields is None):
-            raise RuntimeError("Yields not given.")
-        if (self.dividendPeriods is None):
-            raise RuntimeError("Yields not given.")
-        
-        self._checkIndex(period_index, 0)
-        if isinstance(self.dividendYields, np.ndarray) and isinstance(self.dividendPeriods, np.ndarray):
-            if np.isin(period_index, self.dividendPeriods):
-                return self.dividendYields[self.dividendPeriods == period_index]
-        return 0.0
-        
-    @property
-    def dividendActive(self) -> bool:
-        return self._dividendActive
-    @property
-    def dividendYields(self):
-        return self._dividendYields
-    @property
-    def dividendPeriods(self):
-        return self._dividendPeriods
-
-    def dividendPayoff(self, period_index: int, outcome_index: int) -> float:
-        return self.getValue(period_index, outcome_index)
-        
 ## Interest Rates Lattices
 class RatesLattice(Lattice):
     """ 
@@ -195,23 +139,24 @@ class ShortTermRates(RatesLattice):
 
 ## Payoff Lattice
 class PayoffLattice(Lattice, ABC):
-    def __init__(self, strike_price: float|None=None, asset_lattice: Lattice|None=None, 
+    def __init__(self, asset_lattice: Lattice|None=None, 
                  rates_lattice: ShortTermRates|float|None=None, maturity_index: int=1):
         super().__init__(maturity_index)
+
+        if rates_lattice is None:
+            rates_lattice = ShortTermRates(initial_rate=1.0, up_move=1.0, down_move=1.0, num_periods=maturity_index)
+
         if (rates_lattice is not None):
             if isinstance(rates_lattice, Real):
                 self._ratesLattice = ShortTermRates(initial_rate=float(rates_lattice), up_move=1.0, down_move=1.0, num_periods=maturity_index)
             elif isinstance(rates_lattice, ShortTermRates):
                 self._ratesLattice = rates_lattice
             else:
-                raise ValueError("`rates` should be a scalar positive number or a `ShortTermRates` object.")
-            
-        else:
-            self._ratesLattice = None
-        self._assetLattice = asset_lattice
-        self._strikePrice = strike_price
+                raise TypeError("`rates` should be a scalar positive number or a `ShortTermRates` object.")
 
-        if maturity_index<1:
+        self._assetLattice = asset_lattice
+
+        if maturity_index<0:
             raise ValueError("The option maturity should be positive")
         self._maturityIndex = maturity_index
         if (self.assetLattice is not None) and (self.maturityIndex>self.assetLattice.numPeriods):
@@ -223,8 +168,7 @@ class PayoffLattice(Lattice, ABC):
     def assetLattice(self) -> Lattice|None:
         return self._assetLattice
     @property
-    @abstractmethod
-    def ratesLattice(self) -> ShortTermRates|None:
+    def ratesLattice(self) -> ShortTermRates|float|None:
         return self._ratesLattice
     @property
     def maturityIndex(self) -> int:
@@ -232,9 +176,6 @@ class PayoffLattice(Lattice, ABC):
     @property
     def fairPrice(self) -> float:
         return self._fairPrice
-    @property
-    def strikePrice(self) -> float|None:
-        return self._strikePrice
 
     def getFairPrice(self, number_of_options: int) -> float:
         if (number_of_options<0):
@@ -242,19 +183,14 @@ class PayoffLattice(Lattice, ABC):
         return float(number_of_options) * self.fairPrice
 
     @abstractmethod
-    def _backwardValue(self, period_index, outcome_index) -> float:
+    def _backwardValue(self, period_index: int, outcome_index: int) -> float:
         pass
-
-    def _priceOption(self, payoff_function, **kwargs):
-        raise NotImplementedError(
-            "_priceOption is only supported by option lattices."
-        )
-
+    
     def _backwardInduction(self):
         for period_index in range(self.numPeriods, -1, -1):
             for outcome_index in range(period_index + 1):
-                payoff = self._backwardValue(period_index, outcome_index)
-                self.setValue(payoff, period_index, outcome_index)
+                value = self._backwardValue(period_index, outcome_index)
+                self.setValue(value, period_index, outcome_index)
 
         self._fairPrice = self.getValue(0,0)
 
@@ -297,6 +233,7 @@ class ElementaryPiceLattice(Lattice):
 
         p_sum = np.sum( self.getValues(period_index) )
         return p_sum**(-1.0 / period_index) - 1.0
+
 ## Hazard lattice
 class HazardLattice(Lattice):
     def __init__(self, num_periods: int, hazard_function, *args):
@@ -312,21 +249,35 @@ class HazardLattice(Lattice):
 ## Bonds
 class BondLattice(PayoffLattice):
     def __init__(self, move_up_prob: float, rates_lattice: ShortTermRates, maturity_index: int,
-                 coupon_rate: float = 0.0, coupon_periods: npt.ArrayLike | None = None,
-                 hazard_lattice: HazardLattice | None = None, recovery_rate: float = 0.0):
+                 coupon_rate: float = 0.0, coupon_periods: npt.ArrayLike|None=None,
+                 default_probability: float|None=None, hazard_lattice: HazardLattice|None = None, 
+                 recovery_rate: float = 0.0):
         
         if not isinstance(rates_lattice, ShortTermRates):
             raise TypeError("Interest rates lattice must be of type `ShortTermRates`.")
         # self, strike_price=0.0, asset_lattice: Lattice, rates: ShortTermRates|float, maturity_index: int
-        super().__init__(strike_price=0.0, rates_lattice=rates_lattice, maturity_index=maturity_index)
+        super().__init__(rates_lattice=rates_lattice, maturity_index=maturity_index)
+
+        if (default_probability is None and hazard_lattice is None) and recovery_rate!=0.0:
+            warnings.warn("No hazard lattice or default probability are provided" 
+                            "but recovery rate is non-zero, this will be ignored.")
+            
+        if default_probability is None:
+            default_probability = 0.0
+        elif not isinstance(default_probability, Real):
+            raise TypeError("Default probability must be a real number.")
+        
+        if (default_probability>1.0) or (default_probability<0.0):
+            raise ValueError("Default probability must be between 0.0 and 1.0") 
+        
+        if (hazard_lattice is None):
+
+            self._recoveryRate = 0.0
+
+            hazard_lattice = HazardLattice(self.numPeriods, lambda i,j: default_probability)
 
         if not isinstance(hazard_lattice, HazardLattice):
             raise TypeError("`hazard_lattice` must be a `HazardLattice`.")
-        if hazard_lattice is None:
-            self._hazardLattice = HazardLattice(self.numPeriods, lambda period_index, outcome_index: 0.0)
-            if recovery_rate!=0.0:
-                warnings.warn("No hazard lattice is provided but recovery rate is non-zero, this will be ignored.")
-            self._recoveryRate = 0.0
         else:
             if hazard_lattice.numPeriods < self.numPeriods:
                 raise ValueError("hazard_lattice` must have at least as many periods as the bond itself, `n_periods`.")
@@ -363,7 +314,7 @@ class BondLattice(PayoffLattice):
             return 1.0 + self._coupon(self.numPeriods)
         else:
             if self.ratesLattice is None:
-                        raise ValueError("Rates lattice must be provided.")
+                raise ValueError("Rates lattice must be provided.")
             node_value = (self.moveDownProb
                         * (1.0 - self.hazardLattice.getValue(period_index, outcome_index))
                         * self.getValue(period_index + 1, outcome_index))
@@ -403,7 +354,6 @@ class BondLattice(PayoffLattice):
     # --- MODEL SPECIFICS --- #
     def setFaceValue(self, face_value: float) -> None:
         self._lattice *= face_value
-
 class ZeroCouponBondLattice(BondLattice):
     def __init__(self, move_up_prob: float, rates_lattice: ShortTermRates, num_periods: int,
                  hazard_lattice: HazardLattice | None = None, recovery_rate: float = 0.0):
@@ -412,7 +362,7 @@ class ZeroCouponBondLattice(BondLattice):
                          hazard_lattice=hazard_lattice, recovery_rate=recovery_rate)
 
 ## Forward and Future Contract
-class FutureContract(PayoffLattice):
+class FutureLattice(PayoffLattice):
     def __init__(self, bond_lattice: BondLattice, maturity_index: int):
         super().__init__(maturity_index=maturity_index)
         self._bondLattice = bond_lattice
@@ -438,7 +388,7 @@ class FutureContract(PayoffLattice):
     def bondLattice(self) -> Lattice:
         return self._bondLattice
     
-class ForwardContract(PayoffLattice):
+class ForwardLattice(PayoffLattice):
     def __init__(self, bond_lattice: BondLattice, rates_lattice: ShortTermRates, move_up_prob: float, maturity_index: int):
         super().__init__(rates_lattice=rates_lattice, maturity_index=maturity_index)
         self._bondLattice = bond_lattice
@@ -452,7 +402,7 @@ class ForwardContract(PayoffLattice):
         if (self.ratesLattice is None):
             raise RuntimeError("Rates lattice not provided.") 
         
-        self._zero_coupon_bond = ZeroCouponBondLattice(self._moveUpProb, self.ratesLattice, self.numPeriods)
+        zero_coupon_bond = ZeroCouponBondLattice(self._moveUpProb, self.ratesLattice, self.numPeriods)
 
         self._backwardInduction()
         self._fairPrice = self.getValue(0,0)
@@ -468,19 +418,19 @@ class ForwardContract(PayoffLattice):
                             + self.getValue(period_index+1, outcome_index+1)))
             payoff *= self.ratesLattice.getDiscount(period_index, outcome_index)
             if period_index==0 and outcome_index==0:
-                payoff /= self._zero_coupon_bond.getFairPrice(1)
+                payoff /= zero_coupon_bond.getFairPrice()
             return payoff
         
     # --- GETTERS --- #
     @property
     def bondLattice(self) -> Lattice:
         return self._bondLattice
-    
-# European Options
+
+## European Option
 class EuropeanOptionLattice(PayoffLattice):
-    def __init__(self, strike_price: float, asset_lattice: BinomialLattice, rates_lattice: ShortTermRates | float,
-        maturity_index: int, call: bool = True, dividend_rate: float | npt.ArrayLike = 0.0, dividend_periods: int | npt.ArrayLike | None = None,
-        separate_cashflows: bool = True):
+    def __init__(self, strike_price: float, asset_lattice: Lattice, rates_lattice: ShortTermRates | float,
+                 maturity_index: int, is_call: bool = True, dividend_rate: float | npt.ArrayLike = 0.0, 
+                 dividend_periods: int | npt.ArrayLike | None = None, separate_cashflows: bool = True):
         """        
         strike_price (float): The strike pice of the option.
         asset_lattice (BinomialLattive): The lattice describing the value of the underlying asset.
@@ -492,10 +442,10 @@ class EuropeanOptionLattice(PayoffLattice):
         maturity_index (int): A number of periods until maturity for the option. Defaults to the
             number of periods in the asset lattice.
         """
-        super().__init__(maturity_index)
+        super().__init__(asset_lattice=asset_lattice, rates_lattice=rates_lattice, 
+                         maturity_index=maturity_index)
 
         self._strikePrice = strike_price
-        self._assetLattice = asset_lattice
         self._separateCashflows = separate_cashflows
 
         # --------------------------------------------------
@@ -503,16 +453,17 @@ class EuropeanOptionLattice(PayoffLattice):
         # --------------------------------------------------
         self._constantRate = isinstance(rates_lattice, Real)
         if self._constantRate:
-            self.ratesLattice = rates_lattice
+            self._ratesLattice = rates_lattice
         else:
             if not isinstance(rates_lattice, ShortTermRates):
                 raise TypeError("`rates_lattice` must be a float or `ShortTermRates`.")
-            self.ratesLattice = rates_lattice
+            self._ratesLattice = rates_lattice
 
         # --------------------------------------------------
         # Option type
         # --------------------------------------------------
-        self._callTypeMultiplier = 1.0 if call else -1.0
+        self._isCall = is_call
+        self._callTypeMultiplier = 1.0 if is_call else -1.0
 
         # --------------------------------------------------
         # Dividend yield
@@ -537,7 +488,7 @@ class EuropeanOptionLattice(PayoffLattice):
 
         if dividend_periods is None:
             self.dividendPeriods = np.array([], dtype=int)
-        elif isinstance(dividend_periods, float):
+        elif isinstance(dividend_periods, int):
             self.dividendPeriods = np.array([dividend_periods], dtype=int)
         else:
             self.dividendPeriods = np.asarray(dividend_periods,dtype=int)
@@ -566,7 +517,7 @@ class EuropeanOptionLattice(PayoffLattice):
         stock_price = self.assetLattice.getValue(period_index, outcome_index)
         # Terminal payoff
         if period_index == self.numPeriods:
-            return self._callTypeMultiplier * max(stock_price - self.strikePrice,0.0)
+            return self._callTypeMultiplier * max(stock_price - self.strikePrice, 0.0)
         # Short rate
         if self._constantRate:
             rate = self.ratesLattice
@@ -590,70 +541,97 @@ class EuropeanOptionLattice(PayoffLattice):
                       + (1.0 - neutral_prob) * self.getValue(period_index + 1, outcome_index)) / (1.0 + rate)
 
         return node_value
+    
     @property
     def strikePrice(self) -> float:
         return self._strikePrice
+    @property 
+    def isCall(self) -> bool:
+        return self._isCall
     @property
     def assetLattice(self):
         return self._assetLattice
     @property
     def separateCashflows(self) -> bool:
         return self._separateCashflows
-       
-# Caplets and Floorlets
-class CapletLattice(PayoffLattice):
-    def __init__(self, strike_price: float, rates_lattice: ShortTermRates, maturity_index: int, risk_neutral_up_prob: float|None=None):
-        super().__init__(strike_price=strike_price, asset_lattice=rates_lattice, rates_lattice=rates_lattice, maturity_index=(maturity_index -1))
+ 
+## Swap contract
+class SwapLattice(EuropeanOptionLattice):
+    def __init__(self, fixed_rate: float, maturity_index: int, rates_lattice: ShortTermRates, 
+                 first_payment_period: int):
+
+        # self, strike_price: float, asset_lattice: Lattice, rates_lattice: ShortTermRates | float,
+        # maturity_index: int, is_call: bool = True, dividend_rate: float | npt.ArrayLike = 0.0, 
+        # dividend_periods: int | npt.ArrayLike | None = None, separate_cashflows: bool = True
+
+        super().__init__(strike_price=fixed_rate, asset_lattice=rates_lattice, 
+                         rates_lattice=rates_lattice, maturity_index=(maturity_index-1))
         
-        if (risk_neutral_up_prob is not None) and not isinstance(risk_neutral_up_prob, Real):
-            raise TypeError("The risk-neutral probability must be a positive real number.")
-        if isinstance(risk_neutral_up_prob, Real) and (risk_neutral_up_prob>1.0 or risk_neutral_up_prob<0.0):
-            raise ValueError("The risk-neutral porbability must be between 0.0 and 1.0.")
-
-        self._riskNeutralUpProb = 0.5 if (risk_neutral_up_prob is None) else risk_neutral_up_prob
-        self._riskNeutralDownProb = 1. - self._riskNeutralUpProb
-        # self._priceOption(self.payoffFunction, self._riskNeutralUpProb)
-
-        self._backwardInduction()
+        self._firstPaymentPeriod = first_payment_period
 
     def _backwardValue(self, period_index: int, outcome_index: int) -> float:
-         self._checkIndex(period_index, outcome_index)
-         if period_index==self.maturityIndex:
-             if self.strikePrice is None:
-                 raise RuntimeError("Strike price not given.")
-             if self.ratesLattice is None:
-                 raise RuntimeError("Rates lattice not given.")
-             payoff = max(self.ratesLattice.getValue(self.numPeriods, outcome_index) - self.strikePrice, 0)
-             return payoff
-         else:
-            if self.ratesLattice is None:
-                raise RuntimeError("Rates lattice not given.")
-            
-            payoff = ( self._riskNeutralUpProb*self.getValue(period_index+1, outcome_index+1) 
-                      + self._riskNeutralUpProb * self.getValue(period_index+1, outcome_index))
-            payoff *= self.ratesLattice.getDiscount(period_index, outcome_index)
-            self.setValue(payoff, period_index, outcome_index) 
-         return payoff
+        if period_index == self.numPeriods:
+            value = ((self.ratesLattice.getValue(period_index, outcome_index) - self.fixedRate) 
+                     * self.ratesLattice.getValue(period_index, outcome_index))
+        else:
+            value = 0.5 * (self.getValue(period_index+1, outcome_index+1)
+                           + self.gatValue(period_index+1, outcome_index))
+            if period_index >= (self.firstPaymentPeriod-1):
+                value += (self.ratesLattice.getValue(period_index, outcome_index) - self.fixedRate)
+            value *= self.ratesLattice.getDiscount(period_index, outcome_index)
+
+        return value
+        
+    # --- GETTERS --- #
+    @property
+    def fixedRate(self) -> float:
+        return self._strikePrice
+    @property
+    def firstPaymentPeriod(self) -> float:
+        return self._firstPaymentPeriod
+
+## Swaption Lattice
+class SwaptionLattice(EuropeanOptionLattice):
+    def __init__(self, strike_price: float, swap_lattice: SwapLattice, 
+                 maturity_index: int, is_call: bool=True):
+
+        super().__init__(strike_price = strike_price, asset_lattice = swap_lattice, 
+                         rates_lattice=swap_lattice.ratesLattice, maturity_index=maturity_index, 
+                         is_call=is_call)
+
+    def _backwardValue(self, period_index: int , outcome_index: int) -> float:
+        if period_index==self.numPeriods:
+            value = max(self.assetLattice.getValue(period_index, outcome_index) - self.strikePrice, 0)
+            value *= self._callTypeMultiplier
+        else: 
+            value = 0.5 * ( self.getValue(period_index+1, outcome_index+1)
+                           + self.getValue(period_index+1, outcome_index))
+            value *= self.ratesLattice.getDiscount(period_index, outcome_index)
+
+        return 0.0
+
+## Caps n Floors
+class CapletLattice(EuropeanOptionLattice):
+    def __init__(self, strike_price: float, rates_lattice: ShortTermRates, 
+                 maturity_index: int):
+ 
+        super().__init__(strike_price=strike_price, asset_lattice=rates_lattice, 
+                         rates_lattice=rates_lattice, maturity_index=(maturity_index -1),
+                         is_call=True)
 
 class FloorletLattice(EuropeanOptionLattice):
     def __init__(self, strike_price: float, rates_lattice: ShortTermRates, maturity_index: int, risk_neutral_up_prob: float|None=None):
+
         super().__init__(strike_price=strike_price, asset_lattice=rates_lattice, 
-                         rates_lattice=rates_lattice, maturity_index=(maturity_index -1))
+                         rates_lattice=rates_lattice, maturity_index=(maturity_index -1),
+                         is_call=False)
 
-        self._strikePrice = strike_price
-        self._riskNeutralUpProb = 0.5
-        self._backwardInduction()
-
-    def _backwardValue(self, period_index: int, outcome_index: int) -> float:
-         payoff = max(self.strikePrice - self.ratesLattice.getValue(self.numPeriods, outcome_index), 0)
-         payoff *= self.ratesLattice.getDiscount(self.numPeriods, outcome_index)
-         return payoff
-    
-# Caps and Floors
 class CapOption:
     def __init__(self, strike_price: float, rates_lattice: ShortTermRates, 
-                 maturities: npt.ArrayLike, index_maturities: bool=True):
-        
+                 maturities: npt.ArrayLike|None=None, index_maturities: bool=True):
+        if maturities is None:
+            maturities = np.arange(1, rates_lattice.numPeriods + 1)
+
         if not isinstance(rates_lattice, ShortTermRates):
              raise TypeError("Interest rates must be of type `ShortTermRates`.")
 
@@ -662,9 +640,8 @@ class CapOption:
         self._maturities = np.asarray(maturities, dtype=int)
         self._periodDuration = self.rates.periodDuration
         self._accrualPeriod = self.maturities - np.insert(self.maturities[:-1], 0, 0.)
-        if self._indexMaturities:
-            self._accrualPeriod *= self._periodDuration
-        self._indexMaturities = index_maturities
+        if index_maturities:
+            self._accrualPeriod = self._accrualPeriod * self._periodDuration
 
         if (len(self.maturities)==0):
             raise ValueError("Must have at least one maturity time.")
@@ -678,12 +655,17 @@ class CapOption:
             raise ValueError("The highest maturity time must be less than the number of periods in the rates lattice.")
         if len(np.unique(self.maturities)) != len(self.maturities):
             raise ValueError("Maturity times are not unique.")
-        
+
+        self.__calculatePrice()
+
+    def __calculatePrice(self):
         caplet_payoffs = []
         for period_index in range(self.numberOfCaplets):
-            cap = CapletLattice(strike_price=self.strikePrice, rates_lattice=self._ratesLattice, maturity_index=self.maturities[period_index])
+            cap = CapletLattice(strike_price=self.strikePrice, rates_lattice=self.ratesLattice, 
+                                maturity_index=self.maturities[period_index])
             caplet_payoffs.append( self.accrualPeriod[period_index] * cap.fairPrice )
 
+        self._capletFairPrices = np.asarray(caplet_payoffs, dtype=float)
         self._fairPrice = np.sum(caplet_payoffs)
 
     @property
@@ -707,112 +689,30 @@ class CapOption:
     @property
     def ratesLattice(self) -> ShortTermRates:
         return self._ratesLattice
-    
+    @property
+    def fairPriceSeries(self) -> npt.NDArray:
+        return self._capletFairPrices
+
     def value(self, notional_value: float) -> float:
         return float(notional_value) * self.fairPrice
 
-class FloorOption:
-    def __init__(self, strike_price: float, rates: ShortTermRates, 
-                 maturities: npt.ArrayLike, index_maturities: bool=True):
-        
-        if not isinstance(rates, ShortTermRates):
-             raise TypeError("Interest rates must be of type `ShortTermRates`.")
+class FloorOption(CapOption):
+    def __init__(self, strike_price: float, rates_lattice: ShortTermRates, 
+                 maturities: npt.ArrayLike|None=None, index_maturities: bool=True):
 
-        self._rates = rates
-        self._strikePrice = strike_price
-        self._maturities = np.asarray(maturities, dtype=int)
-        self._periodDuration = self.rates.periodDuration
-        self._accrualPeriod = self.maturities - np.insert(self.maturities[:-1], 0, 0.)
-        if self._indexMaturities:
-            self._accrualPeriod *= self._periodDuration
-        self._indexMaturities = index_maturities
+        super().__init__(strike_price=strike_price, rates_lattice=rates_lattice ,
+                         maturities=maturities, index_maturities=index_maturities)
 
-        if (len(self.maturities)==0):
-            raise ValueError("Must have at least one maturity time.")
-        if np.any(self.maturities<=0):
-            raise ValueError("Maturity times must be postive.")
-
-        max_maturity_time = np.max(self._maturities)
-        self._numberOfCaplets = len(self.maturities)
-
-        if max_maturity_time>rates.numPeriods:
-            raise ValueError("The highest maturity time must be less than the number of periods in the rates lattice.")
-        if len(np.unique(self.maturities)) != len(self.maturities):
-            raise ValueError("Maturity times are not unique.")
-        
+    def __calculatePrice(self):
         floorlet_payoffs = []
         for period_index in range(self.numberOfCaplets):
-            floor = FloorletLattice(strike_price=self.strikePrice, rates_lattice=rates, maturity_index=self.maturities[period_index])
+            floor = FloorletLattice(strike_price=self.strikePrice, rates_lattice=rates_lattice, 
+                                    maturity_index=self.maturities[period_index])
             floorlet_payoffs.append( self.accrualPeriod[period_index] * floor.fairPrice )
 
+        self._floorletPrices = np.asarray(floorlet_payoffs, dtype=float)
         self._fairPrice = np.sum(floorlet_payoffs)
 
     @property
-    def maturities(self) -> npt.NDArray:
-        return self._maturities
-    @property
-    def strikePrice(self) -> float:
-        return self._strikePrice
-    @property
-    def rates(self) -> ShortTermRates:
-        return self._rates
-    @property
-    def fairPrice(self) -> float:
-        return self._fairPrice
-    @property
-    def accrualPeriod(self) -> npt.NDArray:
-        return self._accrualPeriod
-    @property
-    def numberOfCaplets(self) -> int:
-        return self._numberOfCaplets
-
-    def value(self, notional_value: float) -> float:
-        return float(notional_value) * self.fairPrice
-
-## Swap contract
-class SwapContract(Lattice):
-    def __init__(self, strike_rate: float, maturity_period: int, rates_lattice: ShortTermRates, is_call: bool, first_payment_period: int):
-        super().__init__(maturity_period-1)
-        self._optionFactor = 1.*(is_call) - 1.*(1 - is_call)
-        self._ratesLattice = rates_lattice
-        self._strikeRate = strike_rate
-        self._firstPaymentPeriod = first_payment_period
-
-        for outcome_index in range(self.latticeSize):
-            value = (self._optionFactor 
-                     * (rates_lattice.getValue(self.numPeriods, outcome_index) 
-                        - self._strikeRate))
-            value *= rates_lattice.getDiscount(self.numPeriods, outcome_index)
-            self.setValue(value, self.numPeriods, outcome_index)
-
-        for period_index in range(self.numPeriods-1, -1, -1):
-            for outcome_index in range(period_index + 1):
-                value = (0.5 * (self.getValue(period_index+1, outcome_index) 
-                                + self.getValue(period_index+1, outcome_index+1)))
-                if period_index >= (self._firstPaymentPeriod-1):
-                    value += (self._optionFactor 
-                              * (self._ratesLattice.getValue(period_index, outcome_index) 
-                                 - self._strikeRate))
-                value *= rates_lattice.getDiscount(period_index, outcome_index)
-                self.setValue(value, period_index, outcome_index)
-        
-
-    # --- GETTERS --- #
-    @property
-    def ratesLattice(self) -> RatesLattice:
-        return self._ratesLattice
-
-    @property
-    def strike(self) -> float:
-        return self._strikeRate
-
-    @property
-    def optionFactor(self) -> float:
-        return self._optionFactor
-
-    @property
-    def firstPaymentPeriod(self) -> float:
-        return self._firstPaymentPeriod
-
-    def getFairPrice(self, notational_value: float) -> float:
-        return notational_value * self.getValue(0,0)
+    def fairPriceSeries(self):
+        return self._floorletPrices

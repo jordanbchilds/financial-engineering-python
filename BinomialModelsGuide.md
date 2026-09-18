@@ -1,36 +1,36 @@
 # Guide to the Binomial Pricing Models
 
-This module implements financial models using binomial lattices. The classes are designed to be combined: an underlying asset or interest-rate lattice is constructed first, and derivative or fixed-income instruments are then priced from those lattices. The current class structure is:
+This module implements several financial models using binomial lattices. The classes are designed to be combined: an underlying asset or interest-rate lattice is first constructed, and derivative or fixed-income instruments are then priced from those lattices.
+
+The main classes are:
 
 | Class | Purpose |
 |---|---|
 | `Lattice` | Generic binomial lattice |
-| `BinomialLattice` | Multiplicative binomial lattice for an underlying asset |
-| `AssetLattice` | Base class intended for dividend-aware asset lattices |
-| `RatesLattice` | Generic interest-rate lattice |
+| `BinomialLattice` | Binomial lattice for an underlying asset |
 | `ShortTermRates` | Binomial lattice of short-term interest rates |
-| `PayoffLattice` | Base class for instruments priced by backward induction |
-| `Option` | Base class for European and American options |
-| `EuropeanOption` | European call or put payoff |
-| `AmericanOption` | American call or put payoff |
-| `OptionPricer` | Prices `EuropeanOption` and `AmericanOption` objects |
-| `EuropeanOptionLattice` | European option priced directly on an asset/rate lattice |
-| `ElementaryPiceLattice` | Elementary state-price lattice |
+| `ElementaryPiceLattice` | State-price lattice |
 | `HazardLattice` | Default-probability lattice |
 | `BondLattice` | Coupon-paying bond |
 | `ZeroCouponBondLattice` | Zero-coupon bond |
-| `FutureContract` | Futures contract on a bond |
-| `ForwardContract` | Forward contract on a bond |
-| `CapletLattice` | Interest-rate caplet |
-| `FloorletLattice` | Interest-rate floorlet |
-| `CapOption` | Portfolio of caplets forming an interest-rate cap |
-| `FloorOption` | Portfolio of floorlets forming an interest-rate floor |
-| `SwapContract` | Fixed-for-floating interest-rate swap |
-
+| `FutureLattice` | Futures contract on a bond |
+| `ForwardLattice` | Forward contract on a bond |
+| `SwapLattice` | Interest-rate swap |
+| `SwaptionLattice` | Interest-rate swap option |
+| `CapletLattice` | Caplet option |
+| `FloorletLattice` | Floorlet option |
+| `CapOption` | Cap, a series of caplet options |
+| `FloorOption` | Floor, a series of floorlet options |
+---
 
 ## 1. Basic Lattice Structure
 
-All lattice classes inherit from `Lattice`. A lattice with `n` periods contains `n + 1` possible states at maturity. Nodes are identified by their `period_index`, the time period starting from zero, and thier `outcome_index`, the number of downward movements. For example, a three-period lattice can be represented as:
+All of the models inherit from `Lattice`. A lattice with `n` periods contains `n + 1` possible states at maturity. The individual nodes are identified by:
+
+- `period_index`: the time period, starting from zero
+- `outcome_index`: the number of downward movements
+
+For example, in a three-period lattice may look like:
 
 ```text
 period 0:       100
@@ -42,20 +42,18 @@ period 2:       121          99          81
 period 3:       133.10       108.90       89.10       72.90
 ```
 
-The value at a particular node can be retrieved with the `Lattice.getValue(period_index, outcome_index)` member. All values at a particular period, `period_index`, can be retrieved with `Lattice.getValues(period_index)`. The complete lattice can be displayed using:
+The value at a particular node can be extracted using the `Lattive.getValue()` function, which takes the period index and outcome index as its arguments. All values for a particular period can be retrieved using the `Lattice.getValues()` function, which takes a single argument, `period_index`, and returns a NumPy array.
 
 ```python
-Lattice.printLattice()
+lattice.getValue(period_index, outcome_index)
+lattice.getValues(period_index)
 ```
 
-The lattice istelf can also be accessed directly through the `lattice` property, `Lattice.lattice`, although this is not recommended.
+The whole lattice can pe printed using the `Lattice.printLattice()` member function.
 
+## 2. Constructing an Underlying Asset Lattice
 
-## 2. Underlying Asset Lattices
-
-### 2.1. `BinomialLattice`
-
-`BinomialLattice` creates a multiplicative binomial tree. The value at a node is determined by the initial value and the number of up and down movements. If the up factor is $u$ and the down factor is $d$, $ S_{i,j} = S_0 u^{i-j}d^j, $ where $i$ is the period and $j$ is the number of down movements. The object constructor works as follows,
+The `BinomialLattice` class creates a multiplicative binomial tree, with specified root node and size. The values at each node are determined by its parent node and up or down factors. If the up-factor is $k_u$ and the value at the (i,j)-th node is $a$, then the value at the $(i+1,j+1)$-th node is $a k_u$, similarly for the down-factor of $k_d$ the value in the $(i+1,j)$-th node is $a k_d$. To create a binomial lattice, use the `initial_value` argument to set the value of the root node, the `up_move`/`down_move` arguments to set the up- and down-factors, and the `num_periods` argument to determine the size of the lattice.
 
 ```python
 stock = BinomialLattice(
@@ -66,411 +64,218 @@ stock = BinomialLattice(
 )
 ```
 
-The main properties of the lattice can be retrieved with the following members:
-
-```python
-stock.initialValue
-stock.upMove
-stock.downMove
-stock.numPeriods
-```
-
 ## 3. Interest-Rate Lattices
 
-### 3.1. `RatesLattice`
-
-`RatesLattice` is the base class for interest-rate lattices. In addition to the normal lattice functionality, it stores the length of each period in years, RatesLattice.periodDuration and calculateds the one-period discount factor at a node is obtained with the member `RatesLattice.getDiscount(period_index, outcome_index)`, which corresponds to
-
-$$ D_{i,j}=\frac{1}{1+r_{i,j}}. $$
-
-### 3.2. `ShortTermRates`
-
-`ShortTermRates` creates a multiplicative lattice of short-term interest rates and is constructed in the same manor as binomial lattice. For example
+An interest rates lattice can be constructed using the same arguments as the binomial lattice. The interest rate is given as decimal, rather than a percentage, hence a value of 0.05 in the lattive is equivalent to 5% interest rate. The class also calculates the discount factor, used in binomial modelling, the discount rate at the $(i,j)$-th node can be found using the `ShortTermRates.getDiscount()` function, whose arguments are the period and outcome index, similarly to the `Lattice.getValue()` function.
 
 ```python
 rates = ShortTermRates(
     initial_rate=0.05,
     up_move=1.001,
-    down_move=0.999,
+    down_move=0.009,
     num_periods=3
 )
 ```
 
-Rates are supplied in decimal form, such that an initial value of 0.05 is equivalent to 5% interest rate. The rate at each node is constructed from the initial rate and the up/down factors. A constant-rate lattice can be created by setting the up and down moves to equal 1.0.
+A fixed interest rates lattive can be created by setting `up_move=down_move=1.0`, which may be useful in the contraction of swaps or bonds later on.
 
-## 4. Payoff Lattices
+## 4. Bonds
 
-`PayoffLattice` is the base class for instruments whose value is calculated using backward induction. It can contain:
+### 5.1. State prices
 
-- an underlying asset lattice,
-- a short-term rate lattice,
-- a strike price,
-- a maturity index.
-
-The main properties are:
+`ElementaryPiceLattice` constructs a lattice of elementary state prices. The state price at a node represents the present value of receiving one unit of currency in that particular state. It is created from a short-term interest-rate lattice:
 
 ```python
-PayoffLattice.assetLattice
-PayoffLattice.ratesLattice
-PayoffLattice.strikePrice
-PayoffLattice.maturityIndex
-PayoffLattice.fairPrice
+state_prices = ElementaryPiceLattice(rates)
 ```
 
-The fair price is the value at the root node, `PayoffLattice.fairPrice`, or for a specified number of units/notional, `PayoffLattice.getFairPrice(number_of_options)` can be used.
+which uses $R(0,T) = \left( \sum_s \pi_{T,s} \right)^{-1/T}-1$.
 
-## 5. `EuropeanOptionLattice`
 
-`EuropeanOptionLattice` directly prices a European option using an underlying `BinomialLattice` with either a constant interest rate, or a `ShortTermRates` Lattice. The option is priced assuming the underlying asset follows a binomial model, which is passed to the objects constructor. For example:
+### 5.2. Pricing a zero-coupon bond
+
+A zero-coupon bond pays no dividends, only the payoff at maturity. A bond lattice can be constructed by backwards induction by starting at the paypoff at the final period. The class `ZeroCouponBond` creates such a lattice using an interest rates lattice and notional value. 
 
 ```python
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=0.05,
-    maturity_index=3,
-    call=True
+rates = ShortTermRates(
+    initial_value=0.05, 
+    up_move=1.001, 
+    down_move=0.999,
+    maturity=10
 )
-```
-
-The fair price can accessed following the same interface as the `PayoffLattice` object i.e. using `EuropeanOptionLattice.fairPrice` and `EuropeanOptionLattice.fairPrice()`. If using a dynamic short-term interest rate can be described by a `ShortTermRate` object and passed to the `rates_lattice` argument of the constructor.
-
-```python
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=rates,
-    maturity_index=3,
-    call=True
+zero_coupon_bond = ZeroCouponBondLattice(
+    notional_value=100
+    rates=rates
 )
+
+zero_coupon_bond.getFairPrice()
 ```
 
-### 7.1. Dividend yields
+This calculates $P(0,T) = N\sum_{s=0}^{T} \pi_{T,s}$, where $N$ is the notional value and $\pi_{T,s}$ are the state prices at maturity.
 
-`EuropeanOptionLattice` accepts a proportional dividend yield through `dividend_rate`. A constant dividend yield can be supplied as a scalar or a different yield can be given for each period as an array-like object.
+### 5.4. Coupon-paying bonds
 
-```python
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=0.05,
-    maturity_index=3,
-    call=True,
-    dividend_rate=0.02
-)
-```
+`BondLattice` prices a coupon-paying bond.
 
-The dividend payment periods are specified using `dividend_periods`:
-
-```python
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=0.05,
-    maturity_index=3,
-    call=True,
-    dividend_rate=0.02,
-    dividend_periods=[1, 3]
-)
-```
-
-The current implementation interprets a dividend period as the period at which the dividend is paid. Dividend yields are associated with the corresponding transition in the pricing recursion.
-
-### 7.2. Separate cashflows
-
-The `separate_cashflows` argument determines how the dividend treatment is handled by the option lattice, the default is True.The setting is available by the `EuropeanOptionLattice.separateCashflows` member. When `True`, the dividend yield is treated separately from the underlying price return when calculating the risk-neutral probability. When `False`, the pricing recursion uses the underlying up/down movements without the separate dividend adjustment. Finally the option can be made a put/call using the `is_call` argument, the default is True. For example:
-
-```python
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=rates,
-    maturity_index=3,
-    is_call=True,
-    dividend_rate=0.02,
-    dividend_periods=[1, 3],
-    separate_cashflows=True
-)
-```
-
-## 8. State Prices
-
-`ElementaryPiceLattice` constructs an elementary state-price lattice from a the short-term rates, `ElementaryPiceLattice(rates_lattice)`. The state price at a node represents the present value of one unit of currency received in that state. The class can calculate zero-coupon bond prices:
-
-```python
-state_prices.zeroCouponBondPrice(
-    notational_value=100,
-    maturity_time=3
-)
-```
-
-and implied spot rates:
-
-```python
-state_prices.getSpotRate(3)
-```
-
-The zero-coupon bond price is calculated from the sum of the state prices at maturity, $ P(0,T)=N\sum_s \pi_{T,s}$, where $N$ is the notional value and $\pi_{T,s}$ are the state prices.
-
-## 9. Hazard Lattices
-
-`HazardLattice` represents the probability of default at each node. A constant hazard rate can be constructed using a function:
-
-```python
-hazard_lattice = HazardLattice(
-    num_periods=3,
-    hazard_function=lambda period, outcome: 0.02
-)
-```
-
-The hazard function requires two parameters: `period_index` and `income_index`, so the probability can depend on both time and the state of the Lattice. For example:
-
-```python
-def hazard(period, outcome):
-    return 0.01 + 0.005 * outcome
-
-hazard_lattice = HazardLattice(
-    num_periods=3,
-    hazard_function=hazard
-)
-```
-
-## 10. Bonds
-
-### 10.1. `BondLattice`
-
-`BondLattice` prices a coupon-paying bond using a short-term interest-rate Lattice. A basic bond can be constructed with:
+For example:
 
 ```python
 bond = BondLattice(
     move_up_prob=0.5,
-    rates_lattice=rates,
-    maturity_index=3,
+    interest_rates=rates,
+    num_periods=3,
     coupon_rate=0.05
 )
 ```
 
-By default, coupons are paid at every period. The bond value is normalised to one unit of face value. Therefore `BondLattice.fairPrice` is the value per unit of face value. The lattice can be scaled to a particular face value using:
+By default, coupons are paid at every period.
+
+A bond with a face value of 100 can be priced using:
+
+```python
+bond.getFairPrice(face_value=100)
+```
+
+The underlying lattice is expressed relative to a face value of 1, so:
+
+```python
+bond.getValue(0, 0)
+```
+
+is the price per unit of face value, while:
+
+```python
+bond.getFairPrice(100)
+```
+
+gives the price for a £100 notional.
+
+You can also scale the entire lattice:
 
 ```python
 bond.setFaceValue(100)
 ```
 
-### 10.2. Coupon payment dates
+### 5.4.1. Specifying coupon dates
 
-Coupon payments can be restricted to specified periods using the `coupon_periods` argument, on which the coupon is paid.
+Coupon payments can be restricted to particular periods using `coupon_periods`.
+
+For example, to pay coupons at periods 2 and 4:
 
 ```python
 bond = BondLattice(
     move_up_prob=0.5,
-    rates_lattice=rates,
-    maturity_index=4,
+    interest_rates=rates,
+    num_periods=4,
     coupon_rate=0.05,
-    coupon_periods=[2, 4]
+    coupon_periods={2, 4}
 )
 ```
 
-### 10.3. Defaultable bonds
+The set should contain the periods at which coupons are paid.
 
-A `HazardLattice` can be supplied to incorporate default risk:
+---
+
+### 5.5. Defaultable bonds
+
+Credit risk can be incorporated using `HazardLattice`. A hazard lattice contains the probability of default associated with each node.For example, a constant 2% hazard rate can be constructed with:
 
 ```python
-hazard = HazardLattice(
+hazard_lattice = HazardLattice(
     num_periods=3,
-    hazard_function=lambda period, outcome: 0.02
+    hazard_function = lambda period, outcome: 0.02
 )
+```
 
+The hazard function receives:
+
+```python
+(period, outcome)
+```
+
+so the default probability can depend on both time and the state of the interest-rate lattice.
+
+For example:
+
+```python
+def hazard(period, outcome):
+    return 0.01 + 0.005 * outcome
+```
+
+can be used to create a state-dependent hazard rate. A defaultable bond is then constructed using:
+
+```python
 bond = BondLattice(
     move_up_prob=0.5,
-    rates_lattice=rates,
-    maturity_index=3,
+    interest_rates=rates,
+    num_periods=3,
     coupon_rate=0.05,
-    hazard_lattice=hazard,
+    hazard_lattice=hazard_lattice,
     recovery_rate=0.40
 )
 ```
 
-The recovery rate is expressed as a fraction of face value, and so `recovery_rate=0.40` tepresents 40% recovery. The backward induction incorporates survival, default recovery, discounting and coupon payments.
+At each node the bond value incorporates:
 
-### 10.4. `ZeroCouponBondLattice`
+1. survival to the next period,
+2. the value of the surviving bond,
+3. recovery in the event of default,
+4. discounting,
+5. coupon payments.
 
-`ZeroCouponBondLattice` is a specialised `BondLattice` with no coupon payments, and can also incorporate a hazard lattice and recovery rate.
+Finally, the recovery rate is expressed as a fraction of face value, so `0.40` represents 40% recovery.
 
-```python
-zero_coupon_bond = ZeroCouponBondLattice(
-    move_up_prob=0.5,
-    rates_lattice=rates,
-    num_periods=3
-)
-```
+## 5. Futures Contracts
 
-## 11. Futures Contracts
-
-`FutureContract` represents a futures contract on a bond. The contract takes the bond value at the futures maturity and works backwards through the lattice using the bond's movement probabilities. Its fair price is accessable through the `FutureContract.fairPrice` member.
+`FutureContract` can be used to construct a futures contract on a bond lattice. For example:
 
 ```python
 future = FutureContract(
     bond_lattice=bond,
-    maturity_index=2
+    num_periods=2
 )
 ```
 
-## 12. Forward Contracts
+The futures contract takes the bond value at the contract's maturity and works backwards using the model's 50/50 up/down probabilities. The futures price is available as:
 
-`ForwardContract` prices a forward contract on a bond using an interest-rate Lattice. The forward price is calculated using the future value of the underlying bond, discounting through the interest-rate lattice and normalising by the corresponding zero-coupon bond price. As before, the fair price can be accessed usual the `fairPrice` member.
+```python
+future.fairPrice
+future.getFairPrice()
+```
+
+The underlying bond lattice can also be accessed:
+
+```python
+future.bondLattice
+```
+
+## 6. Forward Contracts
+
+`ForwardContract` is intended to price a forward contract on a bond using an interest-rate lattice. Unlike a futures contract, the forward price is calculated by discounting the expected future bond value and normalising by the price of a zero-coupon bond. The required inputs are:
 
 ```python
 forward = ForwardContract(
     bond_lattice=bond,
-    rates_lattice=rates,
+    interest_lattice=rates,
     move_up_prob=0.5,
-    maturity_index=2
+    num_periods=2
 )
 ```
 
-## 13. Caplets and Floorlets
-
-A cap or floor is constructed as a collection of individual caplets or floorlets. The module provides separate lattice classes for these individual instruments.
-
-### 13.1. `CapletLattice`
-
-`CapletLattice` represents a single caplet on the short-term interest rate. The caplet payoff at its relevant maturity is:
-$$ \max(r_T-K,0), $$
-where $r_T$ is the short-term interest rate and $K$ is the strike rate. One can be constructed by specifying a strike price, maturity index and short-term rates lattice. Additionally, a risk-neutral up probability can optionally be supplied.
+The fair forward price is then:
 
 ```python
-caplet = CapletLattice(
-    strike_price=0.05,
-    rates_lattice=rates,
-    maturity_index=3,
-     risk_neutral_up_prob=0.5
-)
+forward.fairPrice
+forward.getFairPrice()
 ```
 
-### 13.2. `FloorletLattice`
+## 7. Interest-rate swaps
 
-`FloorletLattice` represents a single floorlet, with payoff $ \max(K-r_T,0)$, and can be constructed following the same constructor arguments as the `CapletLattice`.
-
-```python
-floorlet = FloorletLattice(
-    strike_price=0.05,
-    rates_lattice=rates,
-    maturity_index=3
-)
-```
-
-## 14. Caps and Floors
-
-`CapOption` and `FloorOption` aggregate multiple caplets or floorlets. A cap is constructed by specifying:
-
-- a strike rate,
-- a short-term rate lattice,
-- the maturity/payment periods.
-
-For example:
+`SwapLattice` represents a fixed-for-floating interest-rate swap. For example:
 
 ```python
-cap = CapOption(
-    strike_price=0.05,
-    rates_lattice=rates,
-    maturities=[1, 2, 3, 4]
-)
-```
-
-The cap consists of one caplet for each supplied maturity. The number of caplets is available through:
-
-```python
-cap.numberOfCaplets
-```
-
-The maturity dates are available through:
-
-```python
-cap.maturities
-```
-
-The accrual period associated with each caplet is available through:
-
-```python
-cap.accrualPeriod
-```
-
-The fair value of the cap is:
-
-```python
-cap.fairPrice
-```
-
-and the value for a specified notional is:
-
-```python
-cap.value(1_000_000)
-```
-
-### 14.1. Specifying maturity/payment periods
-
-For example:
-
-```python
-cap = CapOption(
-    strike_price=0.05,
-    rates_lattice=rates,
-    maturities=[2, 4, 6, 8]
-)
-```
-
-creates caplets associated with periods 2, 4, 6 and 8.
-
-The `index_maturities` argument controls whether the supplied maturities are interpreted as lattice period indices:
-
-```python
-cap = CapOption(
-    strike_price=0.05,
-    rates_lattice=rates,
-    maturities=[2, 4, 6, 8],
-    index_maturities=True
-)
-```
-
-When `index_maturities=True`, the accrual periods are converted into years using `rates.periodDuration`.
-
-### 14.2. Floor options
-
-A floor is constructed similarly:
-
-```python
-floor = FloorOption(
-    strike_price=0.05,
-    rates=rates,
-    maturities=[1, 2, 3, 4]
-)
-```
-
-The floor is the sum of the corresponding floorlets.
-
-The main properties are:
-
-```python
-floor.maturities
-floor.strikePrice
-floor.accrualPeriod
-floor.numberOfCaplets
-floor.fairPrice
-```
-
-The value for a specified notional is:
-
-```python
-floor.value(1_000_000)
-```
-
-## 15. Interest-Rate Swaps
-
-`SwapContract` represents a fixed-for-floating interest-rate swap.
-
-```python
-swap = SwapContract(
-    strike_rate=0.05,
+swap_lattice = SwapLattice(
+    fixed_rate=0.05,
     maturity_period=4,
     rates_lattice=rates,
     is_call=True,
@@ -478,130 +283,83 @@ swap = SwapContract(
 )
 ```
 
-The `strike_rate` is the fixed rate. The `is_call` argument determines the direction of the swap payoff with a True or False value. The first floating/fixed payment period is controlled by:
+The `strike_rate` is the fixed rate of the swap and the `is_call` argument determines the direction of the payoff. The swap value for a given notional is obtained using the `getFairPrice()` function, which takes the notional value as an argument.
 
 ```python
-first_payment_period
+swap_lattice.getFairPrice(notational_value=1_000_000)
 ```
 
-The swap's fair value for a given notional is:
+### 7.1. Interest-rate swpations
+
+An option can be placed on the interest-rate swap previously defined, the fair value of this can be calculated using the `SwaptionLattice`. For this the a `SwapLattice` must be defined to act as the asset in an option pricing, from this object the short-term interest rates are taken and so the `SwaptionLattice` class does not take an interest rates lattice as an arguemnt. The other important things to define for a swaption are the strike price, maturity time and whether the option is a call or a put. Such a class can be initiated as follows.
 
 ```python
-swap.getFairPrice(1_000_000)
-```
-
-## 16. Typical Workflows
-
-### 16.1. European equity option
-
-```python
-stock = BinomialLattice(
-    initial_value=100,
-    up_move=1.10,
-    down_move=0.90,
-    num_periods=3
-)
-
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=0.05,
+swaption = SwaptionLattice(
+    strike_price = 0.00, 
+    swap_lattice=swap_lattice, 
     maturity_index=3,
-    call=True
+    is_call=True
 )
-
-print(option.fairPrice)
 ```
+The default is that the swpation is call option, however the argument was passed to the constructor here for clarity. Similarly to lattices' before it, the fair price can be found through the `fairPrice` method and the pricing lattice can be printed via the `printLattice` method.
 
-### 16.2. European option with dynamic rates
+## 8. Caps and Floors
+
+### 8.1. Caplets
+
+A Caplet is a type of option similar to a European call option but the short-term interest-rate is treated as the unerlying asset. It can be priced by the same backward induction methods used throughout the pricing models here. The `Caplet` class is defined to do this, which is defined by the `fixed rate`, akin to the strike price, short-term interest rates lattice and maturity. 
 
 ```python
-stock = BinomialLattice(
-    initial_value=100,
-    up_move=1.10,
-    down_move=0.90,
-    num_periods=3
-)
-
-rates = ShortTermRates(
-    initial_rate=0.05,
-    up_move=1.001,
-    down_move=0.999,
-    num_periods=3
-)
-
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=rates,
-    maturity_index=3,
-    call=True
-)
-
-print(option.fairPrice)
+caplet_lattice = CapletLattice(
+    fixed_rate = 0.03, 
+    rates_lattice = rates_lattice,
+    maturity_index = 3)
 ```
 
-### 16.3. European option with dividends
+### 8.2. Caps
+
+A cap is a portfolio of captlets, defined over a period time to hedge against changes inteerst rates. Their value can be calculated by treating them as independent caplets and summing the fair prices. The `CapOption` class is available to do this, which takes a strike price and interest rate lattice as its arguments. By default the class assumes that a caplet is placed over each period, however this can be altered by using the `maturities` argument which should take an array-like object of maturity periods for the caplets in the portfolio.
 
 ```python
-option = EuropeanOptionLattice(
-    strike_price=100,
-    asset_lattice=stock,
-    rates_lattice=rates,
-    maturity_index=3,
-    call=True,
-    dividend_rate=0.02,
-    dividend_periods=[1, 3],
-    separate_cashflows=True
-)
+my_cap = CapOption(strike_price=0.03, 
+                   rates_lattice=rates_lattice)
+
+print(f"The fair prices of the indivudal caplets: {my_cap.fairPriceSeries}")
+print(f"The fair price of the cap: {my_cap.fairPrice:.4f}")
+
 ```
 
-### 16.4. Interest-rate cap
+### 8.3. Floorlets and Floors
+
+A floorlet is "put" version of the a caplet and, similarly, a floor option is a "put" version of the cap, in all other respects they are similar and be priced using the `FloorletLattice` and `FloorOption` classes respectively.
+
 
 ```python
-cap = CapOption(
-    strike_price=0.05,
-    rates_lattice=rates,
-    maturities=[1, 2, 3]
-)
-
-print(cap.fairPrice)
-print(cap.value(1_000_000))
+my_floor = FloorOption(strike_price=0.03, 
+                   rates_lattice=rates_lattice)
+print(f"The fair prices of the indivudal flootlets: {my_floor.fairPriceSeries}")
+print(f"The fair price of the floot: {my_floor.fairPrice:.4f}")
 ```
 
-### 16.5. Interest-rate floor
+## 9. Important Conventions
 
-```python
-floor = FloorOption(
-    strike_price=0.05,
-    rates=rates,
-    maturities=[1, 2, 3]
-)
+### 9.1. Interest rates
 
-print(floor.fairPrice)
-print(floor.value(1_000_000))
-```
-
-
-## 17. Important Conventions
-
-### 17.1. Interest rates
-
-Interest rates are supplied in decimal form:
+Rates should be supplied in decimal form:
 
 ```python
 0.05     # 5%
 0.025    # 2.5%
 ```
 
-not:
+rather than:
 
 ```python
 5        # incorrect for 5%
 2.5      # incorrect for 2.5%
 ```
 
-### 17.2. Movement factors
+### 9.2. Movement factors
 
 The `up_move` and `down_move` arguments are multiplicative factors:
 
@@ -610,84 +368,16 @@ up_move=1.10
 down_move=0.90
 ```
 
-means an upward movement multiplies the value by 1.10 and a downward movement multiplies it by 0.90.
+means that an upward movement increases the asset price by 10% and a downward movement decreases it by 10%.
 
-### 17.3. Periods and time
+### 9.3. Periods
 
-`num_periods` determines the number of binomial steps. It is not automatically interpreted as a number of years.
+`num_periods` determines the number of binomial steps. It is not automatically interpreted as years.
 
-For example, twelve monthly periods can be represented using:
+For example, if one year is divided into 12 monthly periods:
 
 ```python
 num_periods=12
 ```
 
-For interest-rate lattices, the length of each period can be specified with:
-
-```python
-period_duration=1/12
-```
-
-The movement factors and interest rates should therefore be calibrated consistently with the chosen period length.
-
-### 17.4. Maturity indices
-
-Lattice maturities are represented using integer period indices. For example:
-
-```text
-period 0 → initial time
-period 1 → first period
-period 2 → second period
-...
-```
-
-For caps and floors, `maturities` specifies the periods associated with the individual caplets/floorlets.
-
-### 17.5. Notional values
-
-Many lattice prices are normalised to one unit of notional. The `value()` or `getFairPrice()` methods can then be used to scale the result to the desired notional:
-
-```python
-value = cap.value(1_000_000)
-```
-
-## 18. Class Structure Summary
-
-The main inheritance and composition relationships are:
-
-```text
-Lattice
-├── BinomialLattice
-├── AssetLattice
-├── RatesLattice
-│   └── ShortTermRates
-├── ElementaryPiceLattice
-├── HazardLattice
-├── PayoffLattice
-│   ├── BondLattice
-│   │   └── ZeroCouponBondLattice
-│   ├── FutureContract
-│   ├── ForwardContract
-│   ├── EuropeanOptionLattice
-│   ├── CapletLattice
-│   └── FloorletLattice
-└── SwapContract
-
-CapOption
-FloorOption
-```
-
-The most common workflow is therefore:
-
-```text
-Underlying/rate lattice
-        │
-        ├── EuropeanOptionLattice
-        ├── BondLattice
-        │      └── FutureContract / ForwardContract
-        ├── CapletLattice / FloorletLattice
-        │      └── CapOption / FloorOption
-        └── SwapContract
-```
-
-This structure separates the construction of the underlying stochastic lattice from the valuation logic of the financial instrument built on top of it.
+but the code itself does not currently use the actual time interval when constructing the asset lattice. The movement factors and rates therefore need to be calibrated consistently with the chosen period length.
