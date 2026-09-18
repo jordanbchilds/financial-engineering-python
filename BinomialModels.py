@@ -136,7 +136,7 @@ class ShortTermRates(RatesLattice):
     @property
     def downMove(self) -> float:
         return self._downMove
-
+    
 ## Payoff Lattice
 class PayoffLattice(Lattice, ABC):
     def __init__(self, asset_lattice: Lattice|None=None, 

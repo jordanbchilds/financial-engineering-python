@@ -123,7 +123,6 @@ class MeanVariancePortfolio:
     @property 
     def portfolioVolatility(self) -> float:
         return self._portfolioVolatility
-    
     @portfolioVolatility.setter
     def portfolioVolatility(self, vol: float) -> None:
         if not isinstance(vol, Real) or (vol<=0.0):
@@ -182,8 +181,7 @@ class MeanVariancePortfolio:
             
             # If leverage limit is a float, check that it is positive
             if isinstance(leverage_limit, Real):
-                leverage_value = float(leverage_limit)
-                if leverage_value <= 0.0:
+                if leverage_limit<=0.0:
                     raise ValueError("`leverage_limit` must be a positive real number or a length-two tuple of real numbers.")
             # If leverage_limit is a tuple, check that its values have relatively appropriate values
             if isinstance(leverage_limit, tuple):
@@ -218,17 +216,15 @@ class MeanVariancePortfolio:
                            if leverage_limit_active 
                            else [(None, None) for _ in range(n_risky)])
 
-        risk_free_bound = None
         if self.riskFreeActive:
-            risk_free_bound = (None, 1.0)
             if not allow_borrowing:
                 risk_free_bound = (0., 1.)
-            elif borrowing_limit is not None:
+            elif borrowing_limit is None:
+                risk_free_bound = (None, 1.)
+            elif isinstance(borrowing_limit, Real):
                 risk_free_bound = (-borrowing_limit, 1.)
 
-        bounds = ([risk_free_bound] + risky_bounds 
-                  if self.riskFreeActive 
-                  else risky_bounds)
+        bounds = ([risk_free_bound] + risky_bounds if self.riskFreeActive else risky_bounds)
 
         return bounds
     
@@ -274,8 +270,8 @@ class MeanVariancePortfolio:
         """
         if not self.riskFreeActive:
             raise TypeError("Risk free investment must be available to calculate the Sharpe portfolio.")
-        if not isinstance(risk_free_rate, Real) or not (risk_free_rate is None):
-            raise TypeError("Risk free rate must be a real number, if being used.")
+        if not isinstance(risk_free_rate, Real):
+            raise TypeError("Risk free rate must be a real number.")
         
         portfolio_return = x @ self.expectedAssetReturn[1:] 
         volatility = self._volatilityFunction(x, False)
@@ -306,6 +302,7 @@ class MeanVariancePortfolio:
     # -------------------------- # 
     # --- EXTERNAL FUNCTIONS --- #
     # -------------------------- #
+
     # --- CALCULATORS --- # 
     def calculateSharpeRatio(self, risk_free_rate: float|None=None) -> float:
         if (risk_free_rate is not None) and (not isinstance(risk_free_rate, Real)):
@@ -389,10 +386,11 @@ class MeanVariancePortfolio:
             symmetric limit is used, of the form `(-a, a)`, if a length-two tuple is passed, of the form `(a,b)`, then 
             the first element is taken to be the lower bound, and the second the upper. Note if the two-element tuple
             is passed is not checked that the lower bound is negative.
-        scale_variance (float): A real number to scale the variance during the optimisation process. Generally large
+        variance_scalar (float): A real number to scale the variance during the optimisation process. Generally large
             numbers are best for optimisation. Default 1.0e5.
         """
         # --- check variance_scaler is a non-negative real number 
+        # Check variance scaler is an appropriate type
         if not ((isinstance(scale_variance, Real) and scale_variance>0.0) or (scale_variance is None)):
             raise TypeError("Variance scaler must be a positive real number.")
         # Set equal to 1.0 if no scaler is not being used
@@ -517,14 +515,19 @@ class MeanVariancePortfolio:
             warn("minimization failed. Portfolio remains unchanged.")
         return result
 
-    def maximiseSharpeReturn(self, risk_free_rate: float|None=None, **kwargs) -> None:
+    def maximiseSharpeReturn(self, risk_free_rate: float|None=None, target_volatility: float|None=None, 
+                             allow_borrowing: bool=True, borrowing_limit: float|None=None, **kwargs) -> None:
         """ 
-        Finds the portfolio which maximises the Sharpe ratio. The function does not assign any weight to the 
-        risk-free investment. This can be calculated for a desired amount of volatility using the 
-        `setRiskyInvestment` member function.
+        Finds the portfolio which maximises the Sharpe ratio. 
 
         risk_free_rate (float): The risk-free return on investment. If no value is passed the portfolio value
             is used.
+        risk_free_proportion (float): The proportion of the portfolio invested in the risk-less account. Default
+            is 0.0. 
+        allow_borrowing (bool): A indicator to determine whether or you are allowed to bororw at the risk-
+            free rate. The default value is True.
+        borrowing_limit (float): If borrowing at the risk-free rate is allowed, this imposes an upper borrowing limit.
+            The default value is None, imposes no limit. If a limit is given this should be a positive real number. 
         **kwargs: Aadditional parameters to be passed to scipy.minimize
         """
         if (not self.riskFreeActive) and (risk_free_rate is None):
@@ -558,42 +561,48 @@ class MeanVariancePortfolio:
             warn("Minimisation failed. Portfolio remains unchanged.")
         return result
 
-    def setRiskFreeInvestment(self, target_volatility: float, allow_borrowing: bool = True, 
-                              borrowing_limit: float | None = None):
+    def setTargetVolatility(self, target_volatility: float, allow_borrowing: bool = True, 
+                            borrowing_limit: float|None = None):
         """
-        Combine the current risky portfolio with the risk-free asset to achieve a target 
-        portfolio volatility. Primary use to for after using the Sharpe ratio maximisation 
-        method, which does not set a risk-free investment. The function updates the all members
-        of the class to be printed using the `printPortfolio` function.
-
-        target_volatiliy (float): The desired amount of volatility in the portfolio.
-        allow_borrowing (bool): A indicator to determine whether or you are allowed to bororw at the risk-
-            free rate. The default value is True.
-        borrowing_limit (float): If borrowing at the risk-free rate is allowed, this imposes an upper borrowing limit.
-            The default value is None, imposes no limit. If a limit is given this should be a positive real number. 
-        **kwargs: Aadditional parameters to be passed to scipy.minimize
+        Combine the current risky portfolio with the risk-free asset
+        to achieve a target portfolio volatility.
         """
 
         if not isinstance(target_volatility, Real):
             raise TypeError("`target_volatility` must be a real number.")
+
         if target_volatility <= 0:
             raise ValueError("`target_volatility` must be positive.")
+
         if not self.riskFreeActive:
             raise RuntimeError("A risk-free asset must be active.")
 
-        risky_proportion = target_volatility / self.portfolioVolatility
+        # Extract the current risky-asset weights
+        risky_weights = self.portfolioWeights[1:]
 
+        # Volatility of the risky portfolio
+        risky_volatility = self._volatilityFunction(risky_weights, False)
+
+        if risky_volatility <= 0:
+            raise ValueError("Current risky portfolio has zero volatility.")
+
+        # Fraction invested in risky portfolio
+        risky_proportion = target_volatility / risky_volatility
+
+        if target_volatility == risky_volatility:
+            print("Portfolio not updated target volatility reached.")
+            return None
+        
+        # Remaining proportion goes to risk-free asset
         risk_free_proportion = 1.0 - risky_proportion
 
-        if not allow_borrowing and risk_free_proportion < 0.:
+        if not allow_borrowing and risk_free_proportion < 0.0:
             raise ValueError("Target volatility requires borrowing, but borrowing is not allowed.")
 
-        if (borrowing_limit is not None) and (risk_free_proportion < -borrowing_limit):
+        if (borrowing_limit is not None and risk_free_proportion < -borrowing_limit):
             raise ValueError("Target volatility requires borrowing beyond the specified borrowing limit.")
 
-        # Current portfolio contains the risky portfolio
-        # and possibly a risk-free position.
-        risky_weights = (self.portfolioWeights[1:] if self.riskFreeActive else self.portfolioWeights)
+        # Scale the risky portfolio
         new_weights = np.insert(
             risky_proportion * risky_weights,
             0,
@@ -601,17 +610,13 @@ class MeanVariancePortfolio:
         )
 
         self._portfolioWeights = new_weights
+
         self._updateExpectedPortfolioReturns()
 
         return new_weights
     
     ## -- Value at Risk --
     def valueAtRisk(self, qnt: float=0.95, by_asset: bool=False):
-        """ 
-        Calculates and returns the value-at-risk for the portfolio.
-
-        qnt (float): 
-        """
         weights = self.portfolioWeights[1:] if self._riskFreeActive else self.portfolioWeights
         portfolio_returns = np.sum( self._historicReturns * weights, axis=1 )
         portfolio_var = self._calcVaR(portfolio_returns, qnt)
