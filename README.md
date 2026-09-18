@@ -73,6 +73,8 @@ The cap is therefore a series of "payoffs" this is not easily visualised by a si
 The `BlackScholes` class always us to store and calculate information regarding the Black-Scholes model of an option price. Consider the following option European call option for a stock:
 
 ```python
+from DerivativePricing import BlackScholes
+
 option = BlackScholes(
     spot_price = 178,
     strike_price = 170,
@@ -115,6 +117,8 @@ market_data.head()
 As well as investigating deriviative pricing, the python classes here look at portfolio optimisation. The `MeanVariancePortfolio` class allows the user to find the optimal portfolio under a number of constraints, using a dataset of historic stock returns. Here, we will give an example of using the Sharpe ratio. Firstly, generate some sythetic stock returns data.
 
 ```python
+from MeanVarianceOptimisation import MeanVariancePortfolio
+
 # Synthetic daily returns
 np.random.seed(101)
 
