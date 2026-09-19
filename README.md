@@ -2,7 +2,7 @@
 
 A selection of classes developed by me for option pricing under the binomial model and Black-Scholes models. As well as mean-variance portfolio optimisation. The classes were developed and written while undertaken the [Financial Engineering and Risk Management Specialization](https://www.coursera.org/specializations/financialengineering) course provided by Columbia university. The earlier modules of the course focus on using excel in the lectures and for the coursework, this is where I have focused my attention on the python scripts. The final module moves to python where the labs provided sufficient code to complete the assignments. The classes have been separated into seperate python scripts each with a guide of how they may be used. The classes and documentation may be added to at a later, to provide additional functionality or clarity within their guides.  
 
-## Binomial Lattice Example
+## Binomial Option Pricing Model
 
 ### Pricing a defaultable bond
 
